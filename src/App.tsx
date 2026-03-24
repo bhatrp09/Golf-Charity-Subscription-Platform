@@ -120,7 +120,15 @@ const Card = ({ children, className, ...props }: { children: React.ReactNode; cl
   </div>
 );
 
-const Navbar = ({ user, onLogin, onLogout }: { user: any; onLogin: () => void; onLogout: () => void }) => {
+const Navbar = ({ user, onLogin, onLogout, isAdmin, view, setView, onShowAuth }: { 
+  user: any; 
+  onLogin: () => void; 
+  onLogout: () => void;
+  isAdmin: boolean;
+  view: 'user' | 'admin';
+  setView: (view: 'user' | 'admin') => void;
+  onShowAuth: () => void;
+}) => {
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -135,7 +143,7 @@ const Navbar = ({ user, onLogin, onLogout }: { user: any; onLogin: () => void; o
       isScrolled ? 'bg-white/80 backdrop-blur-md border-b border-zinc-100' : 'bg-transparent'
     )}>
       <div className="max-w-7xl mx-auto flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
             <Target className="text-white w-6 h-6" />
           </div>
@@ -143,22 +151,42 @@ const Navbar = ({ user, onLogin, onLogout }: { user: any; onLogin: () => void; o
         </div>
 
         <div className="hidden md:flex items-center gap-8">
-          <a href="#features" className="text-sm font-medium text-zinc-600 hover:text-black">Features</a>
-          <a href="#charities" className="text-sm font-medium text-zinc-600 hover:text-black">Charities</a>
-          <a href="#pricing" className="text-sm font-medium text-zinc-600 hover:text-black">Pricing</a>
+          {!user ? (
+            <>
+              <a href="#concept" className="text-sm font-medium text-zinc-600 hover:text-black">Concept</a>
+              <a href="#features" className="text-sm font-medium text-zinc-600 hover:text-black">Features</a>
+              <a href="#charities" className="text-sm font-medium text-zinc-600 hover:text-black">Charities</a>
+              <a href="#mechanics" className="text-sm font-medium text-zinc-600 hover:text-black">Mechanics</a>
+              <a href="#pricing" className="text-sm font-medium text-zinc-600 hover:text-black">Pricing</a>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setView('user')} className={cn("text-sm font-medium", view === 'user' ? "text-black" : "text-zinc-400 hover:text-black")}>Dashboard</button>
+              {isAdmin && (
+                <button onClick={() => setView('admin')} className={cn("text-sm font-medium", view === 'admin' ? "text-black" : "text-zinc-400 hover:text-black")}>Admin Panel</button>
+              )}
+            </>
+          )}
         </div>
 
-        <div>
+        <div className="flex items-center gap-4">
           {user ? (
             <div className="flex items-center gap-4">
+              <div className="hidden sm:block text-right">
+                <div className="text-xs font-bold uppercase">{user.user_metadata?.full_name}</div>
+                <div className="text-[10px] text-zinc-400 font-mono">{user.email}</div>
+              </div>
               <img src={user.user_metadata?.avatar_url || ''} alt="" className="w-10 h-10 rounded-full border-2 border-zinc-100" />
               <Button variant="outline" onClick={onLogout} className="px-4 py-2 text-sm">
                 <LogOut className="w-4 h-4" />
-                Sign Out
+                <span className="hidden sm:inline ml-2">Sign Out</span>
               </Button>
             </div>
           ) : (
-            <Button onClick={onLogin} className="px-8 py-2 text-sm">Join Now</Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={onShowAuth} className="px-4 py-2 text-sm">Log In</Button>
+              <Button onClick={onShowAuth} className="px-6 py-2 text-sm">Sign Up</Button>
+            </div>
           )}
         </div>
       </div>
@@ -179,6 +207,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<'user' | 'admin'>('user');
+  const [showAuth, setShowAuth] = useState(false);
 
   // Form states
   const [showScoreModal, setShowScoreModal] = useState(false);
@@ -186,14 +215,20 @@ export default function App() {
   const [newScore, setNewScore] = useState({ courseName: '', points: 36, date: new Date().toISOString().split('T')[0] });
   const [showAdminDrawModal, setShowAdminDrawModal] = useState(false);
   const [showAdminCharityModal, setShowAdminCharityModal] = useState(false);
+  const [showCharityModal, setShowCharityModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({ displayName: '', photoURL: '' });
   const [showProofModal, setShowProofModal] = useState(false);
   const [winnerProofUrl, setWinnerProofUrl] = useState('');
   const [editingCharity, setEditingCharity] = useState<Charity | null>(null);
   const [editingDraw, setEditingDraw] = useState<Draw | null>(null);
   const [newCharity, setNewCharity] = useState({ name: '', description: '', logoUrl: '' });
   const [newDraw, setNewDraw] = useState({ month: '', year: new Date().getFullYear(), prizePool: 1000 });
-  const [profileForm, setProfileForm] = useState({ displayName: '', photoURL: '' });
+  const [showAdminUserModal, setShowAdminUserModal] = useState(false);
+  const [selectedAdminUser, setSelectedAdminUser] = useState<UserProfile | null>(null);
+  const [adminUserScores, setAdminUserScores] = useState<GolfScore[]>([]);
+  const [showAdminScoreModal, setShowAdminScoreModal] = useState(false);
+  const [adminTab, setAdminTab] = useState<'users' | 'draws' | 'charities' | 'winners' | 'analytics'>('users');
 
   const isAdmin = useMemo(() => {
     return profile?.role === 'admin' || user?.email === 'bhatrp12@gmail.com';
@@ -747,27 +782,118 @@ export default function App() {
     }
   };
 
-  const handleRunDraw = async (drawId: string) => {
-    if (!isAdmin || !supabase) return;
+  const fetchAdminUserScores = async (uid: string) => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from('scores')
+      .select('*')
+      .eq('uid', uid)
+      .order('date', { ascending: false });
+    if (error) console.error('Error fetching admin user scores:', error.message);
+    else setAdminUserScores(data.map(s => ({ ...s, date: new Date(s.date) })));
+  };
+
+  const handleUpdateUserAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAdminUser || !supabase) return;
     try {
-      const eligibleUsers = allUsers.filter(u => u.subscriptionStatus !== 'none');
-      if (eligibleUsers.length === 0) return alert('No eligible subscribers');
-      const winner = eligibleUsers[Math.floor(Math.random() * eligibleUsers.length)];
-      
       const { error } = await supabase
-        .from('draws')
+        .from('users')
         .update({
-          winnerUid: winner.uid,
-          winnerName: winner.displayName,
-          status: 'completed'
+          role: selectedAdminUser.role,
+          subscriptionStatus: selectedAdminUser.subscriptionStatus,
+          subscriptionExpiresAt: selectedAdminUser.subscriptionExpiresAt,
+          displayName: selectedAdminUser.displayName
         })
-        .eq('id', drawId);
-      
+        .eq('uid', selectedAdminUser.uid);
       if (error) throw error;
+      setShowAdminUserModal(false);
     } catch (e: any) {
-      console.error('Error running draw:', e.message);
+      console.error('Error updating user as admin:', e.message);
     }
   };
+
+  const handleDeleteCharity = async (id: string) => {
+    if (!isAdmin || !supabase) return;
+    if (!confirm('Are you sure you want to delete this charity?')) return;
+    try {
+      const { error } = await supabase.from('charities').delete().eq('id', id);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error deleting charity:', e.message);
+    }
+  };
+
+  const handleAdminSaveScore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAdminUser || !supabase) return;
+    try {
+      const points = Number(newScore.points);
+      const scoreData = {
+        uid: selectedAdminUser.uid,
+        date: new Date(newScore.date).toISOString(),
+        courseName: newScore.courseName,
+        stablefordPoints: points,
+        handicap: 18
+      };
+
+      if (editingScore) {
+        const { error } = await supabase
+          .from('scores')
+          .update(scoreData)
+          .eq('id', editingScore.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('scores').insert(scoreData);
+        if (error) throw error;
+      }
+      setShowAdminScoreModal(false);
+      fetchAdminUserScores(selectedAdminUser.uid);
+    } catch (e: any) {
+      console.error('Error saving admin score:', e.message);
+    }
+  };
+
+  const handleDeleteScore = async (id: string) => {
+    if (!supabase || !selectedAdminUser) return;
+    if (!confirm('Delete this score?')) return;
+    try {
+      const { error } = await supabase.from('scores').delete().eq('id', id);
+      if (error) throw error;
+      fetchAdminUserScores(selectedAdminUser.uid);
+    } catch (e: any) {
+      console.error('Error deleting score:', e.message);
+    }
+  };
+
+  const winnersList = useMemo(() => {
+    return allDraws.filter(d => d.winnerName).map(d => ({
+      drawId: d.id,
+      month: d.month,
+      year: d.year,
+      winnerName: d.winnerName,
+      winnerUid: d.winnerUid,
+      prize: d.prizePool,
+      verified: d.payoutVerified
+    }));
+  }, [allDraws]);
+
+  const charityStats = useMemo(() => {
+    return charities.map(c => ({
+      name: c.name,
+      total: c.totalRaised,
+      percentage: (c.totalRaised / (charities.reduce((acc, curr) => acc + curr.totalRaised, 0) || 1)) * 100
+    }));
+  }, [charities]);
+
+  const drawStats = useMemo(() => {
+    const published = allDraws.filter(d => d.status === 'published' || d.status === 'completed');
+    return {
+      totalPrizes: published.reduce((acc, d) => acc + d.prizePool, 0),
+      avgPrize: published.length ? published.reduce((acc, d) => acc + d.prizePool, 0) / published.length : 0,
+      totalWinners: published.filter(d => d.winnerUid).length
+    };
+  }, [allDraws]);
 
   const chartData = useMemo(() => {
     return [...scores].reverse().map(s => ({
@@ -776,7 +902,19 @@ export default function App() {
     }));
   }, [scores]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-white"><div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div></div>;
+  useEffect(() => {
+    if (user) {
+      setShowAuth(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (selectedAdminUser) {
+        fetchAdminUserScores(selectedAdminUser.uid);
+      }
+    }, [selectedAdminUser]);
+
+    if (loading) return <div className="min-h-screen flex items-center justify-center bg-white"><div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div></div>;
 
   if (!supabase) {
     return (
@@ -800,15 +938,106 @@ export default function App() {
   }
 
   if (!user) {
+    if (showAuth) {
+      return (
+        <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-6 font-sans">
+          <div className="max-w-4xl w-full grid md:grid-cols-2 bg-white rounded-[3rem] shadow-2xl overflow-hidden">
+            <div className="p-12 bg-black text-white flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-12">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center">
+                    <Target className="text-black w-6 h-6" />
+                  </div>
+                  <span className="text-xl font-bold tracking-tighter">FAIRWAY IMPACT</span>
+                </div>
+                <h2 className="text-4xl font-black uppercase tracking-tighter mb-8 leading-none">Join the <br/>Community.</h2>
+                <div className="space-y-6">
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0"><CheckCircle2 className="w-4 h-4 text-orange-500" /></div>
+                    <div>
+                      <div className="text-xs font-bold uppercase mb-1">Subscribe & Win</div>
+                      <div className="text-[10px] text-zinc-400">Monthly prize pools funded by the community.</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0"><CheckCircle2 className="w-4 h-4 text-orange-500" /></div>
+                    <div>
+                      <div className="text-xs font-bold uppercase mb-1">Track Performance</div>
+                      <div className="text-[10px] text-zinc-400">Advanced Stableford analytics for every round.</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0"><CheckCircle2 className="w-4 h-4 text-orange-500" /></div>
+                    <div>
+                      <div className="text-xs font-bold uppercase mb-1">Support Charity</div>
+                      <div className="text-[10px] text-zinc-400">20% of your subscription goes to your chosen cause.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Est. 2026 • Fairway Impact</div>
+            </div>
+            <div className="p-12 flex flex-col justify-center text-center">
+              <h3 className="text-2xl font-black uppercase mb-2 tracking-tighter">Welcome Back</h3>
+              <p className="text-sm text-zinc-500 mb-8">Sign in to access your dashboard and manage your impact.</p>
+              <div className="space-y-4">
+                <Button onClick={handleLogin} className="w-full h-14 flex items-center justify-center gap-3 text-lg">
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" />
+                  Continue with Google
+                </Button>
+                <div className="relative py-4">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-100"></div></div>
+                  <div className="relative flex justify-center text-[10px] uppercase font-bold text-zinc-400"><span className="bg-white px-4">Or</span></div>
+                </div>
+                <Button variant="ghost" onClick={() => setShowAuth(false)} className="w-full h-12 text-xs uppercase font-bold tracking-widest">
+                  Back to Landing Page
+                </Button>
+              </div>
+              <p className="mt-12 text-[10px] text-zinc-400 leading-relaxed">
+                By continuing, you agree to Fairway Impact's <br/>
+                <span className="underline cursor-pointer">Terms of Service</span> and <span className="underline cursor-pointer">Privacy Policy</span>.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-white font-sans">
-        <Navbar user={null} onLogin={handleLogin} onLogout={handleLogout} />
+        <Navbar user={null} onLogin={handleLogin} onLogout={handleLogout} isAdmin={false} view="user" setView={() => {}} onShowAuth={() => setShowAuth(true)} />
         <section className="pt-32 pb-20 px-6 max-w-7xl mx-auto text-center">
           <h1 className="text-7xl font-black tracking-tighter uppercase mb-8">Track. Impact. <span className="text-orange-500">Win.</span></h1>
           <p className="text-xl text-zinc-600 mb-10 max-w-2xl mx-auto">Join the modern golf community. Log scores, support charities, and win monthly prize pools.</p>
-          <Button onClick={handleLogin} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
+          <Button onClick={() => setShowAuth(true)} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
           
-          <div className="mt-20 grid md:grid-cols-3 gap-8 text-left">
+          <div id="concept" className="mt-32 text-left grid md:grid-cols-2 gap-12 items-center">
+            <div>
+              <h2 className="text-5xl font-black uppercase mb-6 tracking-tighter leading-none">The Future of <br/><span className="text-orange-500">Social Golf</span></h2>
+              <p className="text-lg text-zinc-600 mb-8">Fairway Impact is more than just a score tracker. We've built a platform where your passion for golf directly fuels positive change in the world.</p>
+              <div className="space-y-4">
+                <div className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100">
+                  <h4 className="font-bold uppercase mb-2 flex items-center gap-2"><Target className="w-5 h-5 text-orange-500" /> Transparent Draw Mechanics</h4>
+                  <p className="text-sm text-zinc-500">Our draw logic is open and verifiable. Whether it's pure random selection or our performance-weighted algorithm, every subscriber has a fair shot at the prize pool.</p>
+                </div>
+                <div className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100">
+                  <h4 className="font-bold uppercase mb-2 flex items-center gap-2"><Heart className="w-5 h-5 text-red-500" /> Direct Charity Impact</h4>
+                  <p className="text-sm text-zinc-500">20% of every subscription fee is ring-fenced for charity. You choose where your impact goes, and we provide full transparency on total contributions.</p>
+                </div>
+              </div>
+            </div>
+            <div className="relative">
+              <div className="aspect-square bg-zinc-100 rounded-[4rem] overflow-hidden rotate-3">
+                <img src="https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&q=80&w=1000" alt="Golf" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              </div>
+              <div className="absolute -bottom-6 -left-6 bg-black text-white p-8 rounded-[2rem] shadow-2xl -rotate-3">
+                <div className="text-4xl font-black tracking-tighter">$5,000+</div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Average Monthly Prize</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="features" className="mt-32 grid md:grid-cols-3 gap-8 text-left">
             <Card>
               <Target className="w-10 h-10 mb-4 text-orange-500" />
               <h3 className="text-xl font-bold mb-2 uppercase">Performance</h3>
@@ -901,17 +1130,17 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] font-sans">
-      <Navbar user={user} onLogin={handleLogin} onLogout={handleLogout} />
+      <Navbar user={user} onLogin={handleLogin} onLogout={handleLogout} isAdmin={isAdmin} view={view} setView={setView} onShowAuth={() => setShowAuth(true)} />
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
         
-        <div className="flex items-center justify-between mb-12">
+        <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase">{view === 'admin' ? 'Admin Panel' : 'Dashboard'}</h1>
-            <p className="text-zinc-500 font-medium">Welcome, {profile?.displayName}</p>
+            <h1 className="text-5xl font-black tracking-tighter uppercase">{view === 'admin' ? 'Admin Command' : 'Dashboard'}</h1>
+            <p className="text-zinc-500 font-medium">{view === 'admin' ? 'System Overview & Controls' : `Welcome, ${profile?.displayName}`}</p>
           </div>
           <div className="flex gap-3">
             {isAdmin && (
-              <Button variant="outline" onClick={() => setView(view === 'user' ? 'admin' : 'user')}>
+              <Button variant="outline" onClick={() => setView(view === 'user' ? 'admin' : 'user')} className="border-black">
                 {view === 'user' ? 'Switch to Admin' : 'Switch to Dashboard'}
               </Button>
             )}
@@ -920,152 +1149,339 @@ export default function App() {
                 <Button variant="outline" onClick={() => { setProfileForm({ displayName: profile?.displayName || '', photoURL: profile?.photoURL || '' }); setShowProfileModal(true); }}>
                   Profile
                 </Button>
-                {profile?.subscriptionStatus !== 'none' && profile?.subscriptionStatus !== 'lapsed' && (
-                  <Button onClick={() => { setEditingScore(null); setShowScoreModal(true); }} variant="secondary">
-                    <Plus className="w-5 h-5" /> Log Round
-                  </Button>
-                )}
+                <Button onClick={() => { setEditingScore(null); setShowScoreModal(true); }} variant="secondary">
+                  <Plus className="w-5 h-5" /> Log Round
+                </Button>
               </>
             ) : (
-              <div className="flex gap-2">
-                <Button variant="secondary" onClick={() => { setEditingCharity(null); setNewCharity({ name: '', description: '', logoUrl: '' }); setShowAdminCharityModal(true); }}>
-                  Add Charity
-                </Button>
-                <Button variant="secondary" onClick={() => { setEditingDraw(null); setNewDraw({ month: '', year: new Date().getFullYear(), prizePool: 1000 }); setShowAdminDrawModal(true); }}>
-                  New Draw
-                </Button>
+              <div className="flex bg-zinc-100 p-1 rounded-full">
+                {(['users', 'draws', 'charities', 'winners', 'analytics'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setAdminTab(tab)}
+                    className={cn(
+                      "px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all",
+                      adminTab === tab ? "bg-black text-white shadow-lg" : "text-zinc-400 hover:text-zinc-600"
+                    )}
+                  >
+                    {tab}
+                  </button>
+                ))}
               </div>
             )}
           </div>
         </div>
 
-        {view === 'admin' ? (
-          <div className="grid lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-8">
-              <Card className="p-0 overflow-hidden">
-                <div className="p-6 border-b font-bold uppercase tracking-widest">User Management</div>
-                <div className="divide-y">
-                  {allUsers.map(u => (
-                    <div key={u.uid} className="p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <img src={u.photoURL} className="w-8 h-8 rounded-full" />
-                        <div>
-                          <div className="font-bold text-sm">{u.displayName}</div>
-                          <div className="text-xs text-zinc-400">{u.subscriptionStatus}</div>
-                        </div>
-                      </div>
-                      <div className="text-xs font-bold uppercase px-2 py-1 bg-zinc-100 rounded">{u.role}</div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-              <Card className="p-0 overflow-hidden">
-                <div className="p-6 border-b font-bold uppercase tracking-widest">Draw Management</div>
-                <div className="divide-y">
-                  {allDraws.map(d => (
-                    <div key={d.id} className="p-4 flex items-center justify-between">
-                      <div>
-                        <div className="font-bold">{d.month} {d.year}</div>
-                        <div className="text-xs text-zinc-400">${d.prizePool} • {d.status}</div>
-                        {d.payoutVerified && <div className="text-[10px] font-bold text-blue-500 uppercase mt-1">Payout Verified</div>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {d.status === 'active' && (
-                          <Button variant="outline" className="text-xs py-1 h-8" onClick={() => handleRunDraw(d.id)}>Run Draw</Button>
-                        )}
-                        {d.winnerUid && !d.payoutVerified && (
-                          <Button variant="secondary" className="text-xs py-1 h-8" onClick={() => handleVerifyPayout(d.id)}>Verify Payout</Button>
-                        )}
-                        {d.winnerName && <div className="text-xs font-bold text-green-600">Winner: {d.winnerName}</div>}
-                        <button onClick={() => { setEditingDraw(d); setNewDraw({ month: d.month, year: d.year, prizePool: d.prizePool }); setShowAdminDrawModal(true); }} className="p-2 hover:bg-zinc-100 rounded-full">
-                          <Plus className="w-4 h-4 rotate-45" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-              <Card className="p-0 overflow-hidden">
-                <div className="p-6 border-b font-bold uppercase tracking-widest">Charity Management</div>
-                <div className="divide-y">
-                  {charities.map(c => (
-                    <div key={c.id} className="p-4 flex items-center justify-between">
-                      <div>
-                        <div className="font-bold">{c.name}</div>
-                        <div className="text-xs text-zinc-400">Raised: ${c.totalRaised}</div>
-                      </div>
-                      <Button variant="outline" className="text-xs py-1 h-8" onClick={() => { setEditingCharity(c); setNewCharity({ name: c.name, description: c.description, logoUrl: c.logoUrl || '' }); setShowAdminCharityModal(true); }}>Edit</Button>
-                    </div>
-                  ))}
-                </div>
-              </Card>
+        {view === 'user' && profile?.subscriptionStatus === 'none' && (
+          <div className="mb-12 bg-orange-50 border border-orange-100 p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+            <div className="flex items-center gap-6">
+              <div className="w-16 h-16 bg-orange-500 text-white rounded-3xl flex items-center justify-center shadow-lg shadow-orange-200">
+                <Trophy className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-black uppercase tracking-tighter leading-tight">Complete Your Setup</h3>
+                <p className="text-sm text-orange-800/60 font-medium">Subscribe and pick a charity to enter the next draw.</p>
+              </div>
             </div>
-            <div className="space-y-8">
-              <Card className="p-6">
-                <h3 className="font-bold uppercase mb-4">Analytics</h3>
-                <div className="space-y-4">
-                  <div className="p-4 bg-zinc-50 rounded-xl">
-                    <div className="text-xs text-zinc-400 font-bold uppercase">Total Revenue</div>
-                    <div className="text-2xl font-black">${(allUsers.filter(u => u.subscriptionStatus === 'monthly').length * 20 + allUsers.filter(u => u.subscriptionStatus === 'yearly').length * 200).toLocaleString()}</div>
-                  </div>
-                  <div className="p-4 bg-zinc-50 rounded-xl">
-                    <div className="text-xs text-zinc-400 font-bold uppercase">Active Subs</div>
-                    <div className="text-2xl font-black">{allUsers.filter(u => u.subscriptionStatus !== 'none').length}</div>
-                  </div>
+            <div className="flex gap-3">
+              <Button onClick={() => handleSubscribe('monthly')} variant="secondary" className="px-8 h-12">Subscribe Now</Button>
+              <Button variant="outline" onClick={() => setShowCharityModal(true)} className="bg-white border-orange-200 text-orange-900 hover:bg-orange-100 px-8 h-12">Pick Charity</Button>
+            </div>
+          </div>
+        )}
+
+        {view === 'admin' ? (
+          <div className="space-y-8">
+            {adminTab === 'users' && (
+              <Card className="p-0 overflow-hidden border-black/10">
+                <div className="p-6 bg-zinc-50 border-b flex justify-between items-center">
+                  <h3 className="font-black uppercase tracking-tighter text-xl">User Directory</h3>
+                  <div className="text-xs font-mono text-zinc-400">{allUsers.length} TOTAL USERS</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b bg-zinc-50/50">
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">User</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Status</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Role</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Donated</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {allUsers.map(u => (
+                        <tr key={u.uid} className="hover:bg-zinc-50 transition-colors group">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              <img src={u.photoURL} className="w-10 h-10 rounded-full border-2 border-white shadow-sm" />
+                              <div>
+                                <div className="font-bold text-sm">{u.displayName}</div>
+                                <div className="text-xs text-zinc-400 font-mono">{u.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <span className={cn(
+                              "text-[10px] font-bold uppercase px-2 py-1 rounded-md",
+                              u.subscriptionStatus === 'none' ? "bg-zinc-100 text-zinc-400" :
+                              u.subscriptionStatus === 'lapsed' ? "bg-red-50 text-red-500" : "bg-green-50 text-green-600"
+                            )}>
+                              {u.subscriptionStatus}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="text-[10px] font-mono text-zinc-500 uppercase">{u.role}</span>
+                          </td>
+                          <td className="p-4 font-mono text-sm">${u.totalDonated}</td>
+                          <td className="p-4 text-right">
+                            <Button 
+                              variant="ghost" 
+                              className="h-8 px-3 text-[10px] uppercase font-bold"
+                              onClick={() => { setSelectedAdminUser(u); setShowAdminUserModal(true); }}
+                            >
+                              Manage
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </Card>
-              <Card className="p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="font-bold uppercase">Draw Management</h3>
-                  <div className="flex gap-2">
-                    <Button variant={drawType === 'random' ? 'primary' : 'outline'} onClick={() => setDrawType('random')} className="text-[10px] px-3 py-1 h-auto">Random</Button>
-                    <Button variant={drawType === 'algorithmic' ? 'primary' : 'outline'} onClick={() => setDrawType('algorithmic')} className="text-[10px] px-3 py-1 h-auto">Weighted</Button>
-                  </div>
-                </div>
+            )}
 
-                {currentDraw?.status === 'active' ? (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-zinc-50 rounded-xl text-center">
-                      <div className="text-xs text-zinc-400 font-bold uppercase mb-1">Current Prize Pool</div>
-                      <div className="text-3xl font-black">${currentDraw.prizePool.toLocaleString()}</div>
+            {adminTab === 'draws' && (
+              <div className="grid lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                  <Card className="p-0 overflow-hidden">
+                    <div className="p-6 border-b bg-zinc-50 flex justify-between items-center">
+                      <h3 className="font-black uppercase tracking-tighter text-xl">Draw History</h3>
+                      <Button variant="secondary" className="h-8 text-[10px]" onClick={() => { setEditingDraw(null); setNewDraw({ month: '', year: new Date().getFullYear(), prizePool: 1000 }); setShowAdminDrawModal(true); }}>
+                        <Plus className="w-3 h-3" /> Create New
+                      </Button>
                     </div>
-                    <Button onClick={() => runSimulation(drawType)} disabled={isSimulating} className="w-full">
-                      {isSimulating ? 'Simulating...' : 'Run Simulation'}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="p-4 bg-green-50 text-green-700 rounded-xl text-xs font-bold text-center uppercase">
-                    Draw Published for {currentDraw?.month}
-                  </div>
-                )}
-
-                {simulatedDraw && (
-                  <div className="mt-6 p-4 border-2 border-dashed border-zinc-200 rounded-2xl space-y-4">
-                    <div className="text-xs font-bold uppercase text-zinc-400">Simulation Results</div>
-                    <div className="flex justify-center gap-2">
-                      {simulatedDraw.winningNumbers?.map((n, i) => (
-                        <div key={i} className="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center font-bold">{n}</div>
+                    <div className="divide-y">
+                      {allDraws.map(d => (
+                        <div key={d.id} className="p-6 flex items-center justify-between hover:bg-zinc-50 transition-colors">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-black text-lg uppercase tracking-tight">{d.month} {d.year}</span>
+                              <span className={cn(
+                                "text-[10px] font-bold px-2 py-0.5 rounded uppercase",
+                                d.status === 'active' ? "bg-blue-500 text-white" : "bg-zinc-200 text-zinc-600"
+                              )}>{d.status}</span>
+                            </div>
+                            <div className="text-xs font-mono text-zinc-400 flex gap-4">
+                              <span>POOL: ${d.prizePool.toLocaleString()}</span>
+                              {d.rolloverAmount ? <span>ROLLOVER: ${d.rolloverAmount}</span> : null}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {d.status === 'active' && (
+                              <Button variant="primary" className="h-8 text-[10px] uppercase" onClick={() => { setCurrentDraw(d); setAdminTab('draws'); }}>
+                                Run Logic
+                              </Button>
+                            )}
+                            <button onClick={() => { setEditingDraw(d); setNewDraw({ month: d.month, year: d.year, prizePool: d.prizePool }); setShowAdminDrawModal(true); }} className="p-2 hover:bg-zinc-200 rounded-full transition-colors">
+                              <Plus className="w-4 h-4 rotate-45" />
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="p-2 bg-zinc-50 rounded-lg">
-                        <div className="text-[10px] text-zinc-400 font-bold uppercase">5 Match</div>
-                        <div className="font-black">{simulatedDraw.winners?.match5.length || 0}</div>
-                      </div>
-                      <div className="p-2 bg-zinc-50 rounded-lg">
-                        <div className="text-[10px] text-zinc-400 font-bold uppercase">4 Match</div>
-                        <div className="font-black">{simulatedDraw.winners?.match4.length || 0}</div>
-                      </div>
-                      <div className="p-2 bg-zinc-50 rounded-lg">
-                        <div className="text-[10px] text-zinc-400 font-bold uppercase">3 Match</div>
-                        <div className="font-black">{simulatedDraw.winners?.match3.length || 0}</div>
+                  </Card>
+                </div>
+                <div className="space-y-6">
+                  <Card className="p-6 border-black">
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="font-black uppercase tracking-tight">Draw Engine</h3>
+                      <div className="flex bg-zinc-100 p-1 rounded-lg">
+                        <button onClick={() => setDrawType('random')} className={cn("px-3 py-1 text-[10px] font-bold uppercase rounded", drawType === 'random' ? "bg-white shadow-sm" : "text-zinc-400")}>Random</button>
+                        <button onClick={() => setDrawType('algorithmic')} className={cn("px-3 py-1 text-[10px] font-bold uppercase rounded", drawType === 'algorithmic' ? "bg-white shadow-sm" : "text-zinc-400")}>Algo</button>
                       </div>
                     </div>
-                    <Button onClick={publishDraw} variant="secondary" className="w-full">Publish Results</Button>
-                  </div>
-                )}
+
+                    {currentDraw?.status === 'active' ? (
+                      <div className="space-y-6">
+                        <div className="p-6 bg-zinc-900 text-white rounded-2xl text-center">
+                          <div className="text-[10px] font-bold uppercase text-zinc-500 mb-2">Target Prize Pool</div>
+                          <div className="text-4xl font-black tracking-tighter">${currentDraw.prizePool.toLocaleString()}</div>
+                        </div>
+                        <Button onClick={() => runSimulation(drawType)} disabled={isSimulating} className="w-full h-14 uppercase tracking-widest font-black">
+                          {isSimulating ? 'Processing...' : 'Run Simulation'}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="p-8 border-2 border-dashed border-zinc-200 rounded-2xl text-center">
+                        <Target className="w-8 h-8 text-zinc-300 mx-auto mb-3" />
+                        <p className="text-xs font-bold uppercase text-zinc-400">No Active Draw Selected</p>
+                      </div>
+                    )}
+
+                    {simulatedDraw && (
+                      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8 space-y-6 pt-6 border-t">
+                        <div className="text-center">
+                          <div className="text-[10px] font-bold uppercase text-zinc-400 mb-4">Generated Sequence</div>
+                          <div className="flex justify-center gap-2">
+                            {simulatedDraw.winningNumbers?.map((n, i) => (
+                              <div key={i} className="w-10 h-10 rounded-full bg-orange-500 text-white flex items-center justify-center font-black shadow-lg shadow-orange-200">{n}</div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[5, 4, 3].map(m => (
+                            <div key={m} className="p-3 bg-zinc-50 rounded-xl text-center">
+                              <div className="text-[8px] font-bold text-zinc-400 uppercase">Match {m}</div>
+                              <div className="font-black text-lg">{(simulatedDraw.winners as any)?.[`match${m}`]?.length || 0}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <Button onClick={publishDraw} variant="secondary" className="w-full h-12 uppercase font-black">Publish to Public</Button>
+                      </motion.div>
+                    )}
+                  </Card>
+                </div>
+              </div>
+            )}
+
+            {adminTab === 'charities' && (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <Card className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-zinc-200 hover:border-black transition-colors cursor-pointer group" onClick={() => { setEditingCharity(null); setNewCharity({ name: '', description: '', logoUrl: '' }); setShowAdminCharityModal(true); }}>
+                  <Plus className="w-12 h-12 text-zinc-300 group-hover:text-black transition-colors mb-4" />
+                  <span className="font-black uppercase tracking-widest text-xs">Add New Charity</span>
+                </Card>
+                {charities.map(c => (
+                  <Card key={c.id} className="p-0 overflow-hidden flex flex-col">
+                    <div className="h-32 bg-zinc-100 flex items-center justify-center font-black text-zinc-300 text-4xl">
+                      {c.logoUrl ? <img src={c.logoUrl} className="w-full h-full object-cover" /> : 'LOGO'}
+                    </div>
+                    <div className="p-6 flex-1">
+                      <h4 className="font-black uppercase text-lg mb-2">{c.name}</h4>
+                      <p className="text-xs text-zinc-500 line-clamp-3 mb-6">{c.description}</p>
+                      <div className="flex items-center justify-between pt-6 border-t">
+                        <div className="font-mono text-sm font-bold">${c.totalRaised.toLocaleString()}</div>
+                        <div className="flex gap-2">
+                          <button onClick={() => { setEditingCharity(c); setNewCharity({ name: c.name, description: c.description, logoUrl: c.logoUrl || '' }); setShowAdminCharityModal(true); }} className="p-2 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-black transition-colors">
+                            <Plus className="w-4 h-4 rotate-45" />
+                          </button>
+                          <button onClick={() => handleDeleteCharity(c.id)} className="p-2 hover:bg-red-50 rounded-lg text-zinc-400 hover:text-red-500 transition-colors">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {adminTab === 'winners' && (
+              <Card className="p-0 overflow-hidden">
+                <div className="p-6 bg-zinc-50 border-b flex justify-between items-center">
+                  <h3 className="font-black uppercase tracking-tighter text-xl">Winner Verification</h3>
+                  <div className="text-xs font-mono text-zinc-400">{winnersList.length} TOTAL WINNERS</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b bg-zinc-50/50">
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Draw</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Winner</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Prize</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400">Status</th>
+                        <th className="p-4 text-[10px] font-bold uppercase text-zinc-400 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {winnersList.map(w => (
+                        <tr key={w.drawId} className="hover:bg-zinc-50 transition-colors">
+                          <td className="p-4 font-bold uppercase text-sm">{w.month} {w.year}</td>
+                          <td className="p-4">
+                            <div className="font-bold text-sm">{w.winnerName}</div>
+                            <div className="text-[10px] font-mono text-zinc-400">{w.winnerUid}</div>
+                          </td>
+                          <td className="p-4 font-mono font-bold text-orange-600">${w.prize.toLocaleString()}</td>
+                          <td className="p-4">
+                            <span className={cn(
+                              "text-[10px] font-bold uppercase px-2 py-1 rounded",
+                              w.verified ? "bg-green-50 text-green-600" : "bg-yellow-50 text-yellow-600"
+                            )}>
+                              {w.verified ? 'Payout Completed' : 'Pending Verification'}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right">
+                            {!w.verified && (
+                              <Button variant="secondary" className="h-8 text-[10px] uppercase" onClick={() => handleVerifyPayout(w.drawId)}>
+                                Mark Paid
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </Card>
-            </div>
+            )}
+
+            {adminTab === 'analytics' && (
+              <div className="space-y-8">
+                <div className="grid md:grid-cols-3 gap-6">
+                  <Card className="p-8 bg-black text-white">
+                    <div className="text-[10px] font-bold uppercase text-zinc-500 mb-2">Lifetime Prize Pool</div>
+                    <div className="text-5xl font-black tracking-tighter">${drawStats.totalPrizes.toLocaleString()}</div>
+                    <div className="mt-4 text-[10px] font-mono text-zinc-400 uppercase">Avg ${drawStats.avgPrize.toLocaleString()} per draw</div>
+                  </Card>
+                  <Card className="p-8">
+                    <div className="text-[10px] font-bold uppercase text-zinc-400 mb-2">Total Subscribers</div>
+                    <div className="text-5xl font-black tracking-tighter">{allUsers.filter(u => u.subscriptionStatus !== 'none').length}</div>
+                    <div className="mt-4 flex gap-2">
+                      <span className="text-[10px] font-bold px-2 py-1 bg-green-50 text-green-600 rounded uppercase">Active</span>
+                      <span className="text-[10px] font-bold px-2 py-1 bg-red-50 text-red-600 rounded uppercase">{allUsers.filter(u => u.subscriptionStatus === 'lapsed').length} Lapsed</span>
+                    </div>
+                  </Card>
+                  <Card className="p-8">
+                    <div className="text-[10px] font-bold uppercase text-zinc-400 mb-2">Charity Impact</div>
+                    <div className="text-5xl font-black tracking-tighter">${charities.reduce((acc, c) => acc + c.totalRaised, 0).toLocaleString()}</div>
+                    <div className="mt-4 text-[10px] font-mono text-zinc-400 uppercase">Across {charities.length} partners</div>
+                  </Card>
+                </div>
+
+                <div className="grid lg:grid-cols-2 gap-8">
+                  <Card className="p-8">
+                    <h3 className="font-black uppercase tracking-tight mb-8">Charity Contribution Distribution</h3>
+                    <div className="space-y-6">
+                      {charityStats.map(c => (
+                        <div key={c.name} className="space-y-2">
+                          <div className="flex justify-between text-[10px] font-bold uppercase">
+                            <span>{c.name}</span>
+                            <span>{c.percentage.toFixed(1)}%</span>
+                          </div>
+                          <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${c.percentage}%` }}
+                              className="h-full bg-black"
+                            />
+                          </div>
+                          <div className="text-[10px] font-mono text-zinc-400">${c.total.toLocaleString()}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                  <Card className="p-8">
+                    <h3 className="font-black uppercase tracking-tight mb-8">Draw Success Rate</h3>
+                    <div className="h-[300px] flex items-center justify-center border-2 border-dashed border-zinc-100 rounded-3xl">
+                      <div className="text-center">
+                        <TrendingUp className="w-12 h-12 text-zinc-200 mx-auto mb-4" />
+                        <p className="text-xs font-bold uppercase text-zinc-400">Detailed Draw Analytics Coming Soon</p>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid lg:grid-cols-3 gap-8">
@@ -1234,6 +1650,52 @@ export default function App() {
             </motion.div>
           </div>
         )}
+        {showCharityModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-white rounded-[3rem] w-full max-w-2xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-8 border-b flex justify-between items-center bg-zinc-50">
+                <h3 className="text-2xl font-black uppercase tracking-tighter">Support a Cause</h3>
+                <button onClick={() => setShowCharityModal(false)} className="w-10 h-10 rounded-full bg-white border border-zinc-100 flex items-center justify-center hover:bg-zinc-50 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-8 max-h-[60vh] overflow-y-auto">
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {charities.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => { handleSelectCharity(c.id); setShowCharityModal(false); }}
+                      className={cn(
+                        "p-6 rounded-3xl border-2 text-left transition-all group",
+                        profile?.selectedCharityId === c.id ? "border-black bg-black text-white" : "border-zinc-100 hover:border-black"
+                      )}
+                    >
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl mb-4 flex items-center justify-center font-black",
+                        profile?.selectedCharityId === c.id ? "bg-white/20 text-white" : "bg-zinc-50 text-zinc-300 group-hover:text-black"
+                      )}>LOGO</div>
+                      <h4 className="font-bold uppercase mb-1">{c.name}</h4>
+                      <p className={cn(
+                        "text-[10px] line-clamp-2",
+                        profile?.selectedCharityId === c.id ? "text-zinc-400" : "text-zinc-500"
+                      )}>{c.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="p-8 bg-zinc-50 border-t">
+                <p className="text-[10px] text-zinc-400 font-medium text-center uppercase tracking-widest">
+                  20% of your subscription will be donated to your selected charity
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {showAdminCharityModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
             <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2rem] p-8 w-full max-w-md">
@@ -1270,6 +1732,88 @@ export default function App() {
               <h2 className="text-2xl font-black uppercase mb-6">Winner Proof</h2>
               <input type="text" value={winnerProofUrl} onChange={e => setWinnerProofUrl(e.target.value)} placeholder="Image or Video URL" className="w-full p-4 bg-zinc-50 rounded-xl border mb-4" />
               <Button onClick={handleUploadProof} className="w-full py-4">Submit Proof</Button>
+              <Button type="button" variant="ghost" className="w-full mt-2" onClick={() => setShowProofModal(false)}>Cancel</Button>
+            </motion.div>
+          </div>
+        )}
+        {showAdminUserModal && selectedAdminUser && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2rem] p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-2xl font-black uppercase tracking-tighter">User Command: {selectedAdminUser.displayName}</h2>
+                <button onClick={() => setShowAdminUserModal(false)} className="p-2 hover:bg-zinc-100 rounded-full"><X className="w-6 h-6" /></button>
+              </div>
+              
+              <div className="grid md:grid-cols-2 gap-8">
+                <form onSubmit={handleUpdateUserAdmin} className="space-y-6">
+                  <div className="space-y-4">
+                    <h3 className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Profile Configuration</h3>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase text-zinc-400 ml-1">Display Name</label>
+                      <input required type="text" value={selectedAdminUser.displayName} onChange={e => setSelectedAdminUser({...selectedAdminUser, displayName: e.target.value})} className="w-full p-4 bg-zinc-50 rounded-xl border" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase text-zinc-400 ml-1">Subscription Status</label>
+                      <select value={selectedAdminUser.subscriptionStatus} onChange={e => setSelectedAdminUser({...selectedAdminUser, subscriptionStatus: e.target.value as any})} className="w-full p-4 bg-zinc-50 rounded-xl border">
+                        <option value="none">None</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                        <option value="lapsed">Lapsed</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase text-zinc-400 ml-1">Role</label>
+                      <select value={selectedAdminUser.role} onChange={e => setSelectedAdminUser({...selectedAdminUser, role: e.target.value as any})} className="w-full p-4 bg-zinc-50 rounded-xl border">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                  <Button type="submit" className="w-full py-4 uppercase font-black tracking-widest">Update Profile</Button>
+                </form>
+
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Golf Scores</h3>
+                    <Button variant="outline" className="h-8 text-[10px]" onClick={() => { setEditingScore(null); setNewScore({ courseName: '', points: 36, date: new Date().toISOString().split('T')[0] }); setShowAdminScoreModal(true); }}>
+                      <Plus className="w-3 h-3" /> Add Score
+                    </Button>
+                  </div>
+                  <div className="bg-zinc-50 rounded-2xl p-4 space-y-2">
+                    {adminUserScores.length > 0 ? adminUserScores.map(s => (
+                      <div key={s.id} className="bg-white p-3 rounded-xl border flex justify-between items-center group">
+                        <div>
+                          <div className="font-bold text-xs">{s.courseName}</div>
+                          <div className="text-[10px] text-zinc-400">{new Date(s.date).toLocaleDateString()}</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="font-black text-lg">{s.stablefordPoints}</div>
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => { setEditingScore(s); setNewScore({ courseName: s.courseName, points: s.stablefordPoints, date: new Date(s.date).toISOString().split('T')[0] }); setShowAdminScoreModal(true); }} className="p-1 hover:bg-zinc-100 rounded text-zinc-400 hover:text-black"><Plus className="w-3 h-3 rotate-45" /></button>
+                            <button onClick={() => handleDeleteScore(s.id)} className="p-1 hover:bg-red-50 rounded text-zinc-400 hover:text-red-500"><X className="w-3 h-3" /></button>
+                          </div>
+                        </div>
+                      </div>
+                    )) : <div className="text-center py-8 text-zinc-400 text-xs italic">No scores logged</div>}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {showAdminScoreModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2rem] p-8 w-full max-w-md">
+              <h2 className="text-2xl font-black uppercase mb-6">{editingScore ? 'Edit Score' : 'Add Score'}</h2>
+              <form onSubmit={handleAdminSaveScore} className="space-y-4">
+                <input required type="text" value={newScore.courseName} onChange={e => setNewScore({...newScore, courseName: e.target.value})} placeholder="Course Name" className="w-full p-4 bg-zinc-50 rounded-xl border" />
+                <div className="grid grid-cols-2 gap-4">
+                  <input required type="number" value={newScore.points} onChange={e => setNewScore({...newScore, points: Number(e.target.value)})} placeholder="Points" className="w-full p-4 bg-zinc-50 rounded-xl border" />
+                  <input required type="date" value={newScore.date} onChange={e => setNewScore({...newScore, date: e.target.value})} className="w-full p-4 bg-zinc-50 rounded-xl border" />
+                </div>
+                <Button type="submit" className="w-full py-4 uppercase font-black tracking-widest">Save Score</Button>
+                <Button type="button" variant="ghost" className="w-full" onClick={() => setShowAdminScoreModal(false)}>Cancel</Button>
+              </form>
             </motion.div>
           </div>
         )}
