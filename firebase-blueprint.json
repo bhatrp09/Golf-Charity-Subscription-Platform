@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user subscription, charity choice, and basic profile info.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique user ID from Firebase Auth." },
+        "displayName": { "type": "string", "description": "User's full name." },
+        "email": { "type": "string", "description": "User's email address." },
+        "photoURL": { "type": "string", "description": "User's profile picture URL." },
+        "subscriptionStatus": { "type": "string", "enum": ["none", "monthly", "yearly", "lapsed"], "description": "Current subscription tier." },
+        "subscriptionExpiresAt": { "type": "string", "format": "date-time", "description": "When the current subscription period ends." },
+        "autoRenew": { "type": "boolean", "description": "Whether the subscription should automatically renew." },
+        "selectedCharityId": { "type": "string", "description": "ID of the charity the user is supporting." },
+        "totalDonated": { "type": "number", "description": "Total amount donated through subscriptions." },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "User role." },
+        "winnerProofUrl": { "type": "string", "description": "URL to proof of winning (e.g., photo with prize)." }
+      },
+      "required": ["uid", "displayName", "email"]
+    },
+    "GolfScore": {
+      "title": "Golf Score",
+      "description": "A single golf round entry in Stableford format.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner's user ID." },
+        "date": { "type": "string", "format": "date-time", "description": "Date of the round." },
+        "courseName": { "type": "string", "description": "Name of the golf course." },
+        "stablefordPoints": { "type": "number", "description": "Points scored in Stableford format." },
+        "handicap": { "type": "number", "description": "Handicap at the time of the round." }
+      },
+      "required": ["uid", "date", "courseName", "stablefordPoints"]
+    },
+    "Charity": {
+      "title": "Charity",
+      "description": "A charity organization that users can support.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique charity ID." },
+        "name": { "type": "string", "description": "Name of the charity." },
+        "description": { "type": "string", "description": "Brief description of the charity's mission." },
+        "logoUrl": { "type": "string", "description": "URL to the charity's logo." },
+        "totalRaised": { "type": "number", "description": "Total funds raised for this charity." }
+      },
+      "required": ["id", "name", "description"]
+    },
+    "Draw": {
+      "title": "Monthly Draw",
+      "description": "Monthly prize pool and draw status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique draw ID (e.g., '2026-03')." },
+        "month": { "type": "string", "description": "Month of the draw." },
+        "year": { "type": "number", "description": "Year of the draw." },
+        "prizePool": { "type": "number", "description": "Total prize pool amount." },
+        "winnerUid": { "type": "string", "description": "UID of the winner (if drawn)." },
+        "winnerName": { "type": "string", "description": "Name of the winner." },
+        "status": { "type": "string", "enum": ["active", "completed"], "description": "Current status of the draw." },
+        "payoutVerified": { "type": "boolean", "description": "Whether the payout has been verified by admin." }
+      },
+      "required": ["id", "month", "year", "prizePool", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile documents."
+    },
+    "/scores/{scoreId}": {
+      "schema": "GolfScore",
+      "description": "Golf round scores."
+    },
+    "/charities/{charityId}": {
+      "schema": "Charity",
+      "description": "Available charities."
+    },
+    "/draws/{drawId}": {
+      "schema": "Draw",
+      "description": "Monthly draws."
+    }
+  }
+}

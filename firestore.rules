@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (required)
+    //   - email: string (required)
+    //   - photoURL: string (optional)
+    //   - subscriptionStatus: string (enum: none, monthly, yearly)
+    //   - selectedCharityId: string (optional)
+    //   - totalDonated: number (optional)
+    //
+    // Collection: scores
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required)
+    //   - date: timestamp (required)
+    //   - courseName: string (required)
+    //   - stablefordPoints: number (required)
+    //   - handicap: number (optional)
+    //
+    // Collection: charities
+    // Document ID: {charityId}
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - description: string (required)
+    //   - logoUrl: string (optional)
+    //   - totalRaised: number (optional)
+    //
+    // Collection: draws
+    // Document ID: {drawId}
+    // Fields:
+    //   - id: string (required)
+    //   - month: string (required)
+    //   - year: number (required)
+    //   - prizePool: number (required)
+    //   - winnerUid: string (optional)
+    //   - status: string (enum: active, completed)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "bhatrp12@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.uid is string && data.uid.size() > 0 &&
+               data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+               isValidEmail(data.email) &&
+               (!('subscriptionStatus' in data) || data.subscriptionStatus in ['none', 'monthly', 'yearly', 'lapsed']) &&
+               (!('subscriptionExpiresAt' in data) || data.subscriptionExpiresAt is string) &&
+               (!('autoRenew' in data) || data.autoRenew is bool) &&
+               (!('totalDonated' in data) || data.totalDonated is number) &&
+               (!('role' in data) || data.role in ['user', 'admin']) &&
+               (!('winnerProofUrl' in data) || data.winnerProofUrl is string);
+      }
+
+      // Users can only read their own profile (contains email)
+      // Admins can read all profiles
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Users can create their own profile
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (!('role' in request.resource.data) || request.resource.data.role == 'user');
+      
+      // Users can update their own profile, but not their role
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == resource.data.role || isAdmin())) || isAdmin();
+    }
+
+    match /scores/{scoreId} {
+      function isValidScore(data) {
+        let userProfile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+        let hasActiveSub = userProfile.subscriptionStatus in ['monthly', 'yearly'];
+        
+        return data.uid is string && data.uid == request.auth.uid &&
+               hasActiveSub &&
+               data.date is timestamp &&
+               data.courseName is string && data.courseName.size() > 0 && data.courseName.size() < 200 &&
+               data.stablefordPoints is number && data.stablefordPoints >= 1 && data.stablefordPoints <= 45;
+      }
+
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidScore(request.resource.data);
+      allow update: if isDocOwner() && isValidScore(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /charities/{charityId} {
+      allow read: if true; // Publicly readable
+      allow write: if isAdmin();
+    }
+
+    match /draws/{drawId} {
+      allow read: if true; // Publicly readable
+      allow write: if isAdmin();
+    }
+  }
+}
