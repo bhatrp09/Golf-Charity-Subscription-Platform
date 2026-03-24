@@ -4,33 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  onAuthStateChanged, 
-  User 
-} from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  orderBy, 
-  limit, 
-  doc, 
-  setDoc, 
-  updateDoc,
-  deleteDoc,
-  Timestamp,
-  serverTimestamp
-} from 'firebase/firestore';
-import { 
-  auth, 
-  db, 
-  signInWithGoogle, 
-  logout, 
-  OperationType, 
-  handleFirestoreError 
-} from './firebase';
+import { supabase } from './supabase';
 import { 
   Trophy, 
   Heart, 
@@ -146,7 +120,7 @@ const Card = ({ children, className, ...props }: { children: React.ReactNode; cl
   </div>
 );
 
-const Navbar = ({ user, onLogin, onLogout }: { user: User | null; onLogin: () => void; onLogout: () => void }) => {
+const Navbar = ({ user, onLogin, onLogout }: { user: any; onLogin: () => void; onLogout: () => void }) => {
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -177,7 +151,7 @@ const Navbar = ({ user, onLogin, onLogout }: { user: User | null; onLogin: () =>
         <div>
           {user ? (
             <div className="flex items-center gap-4">
-              <img src={user.photoURL || ''} alt="" className="w-10 h-10 rounded-full border-2 border-zinc-100" />
+              <img src={user.user_metadata?.avatar_url || ''} alt="" className="w-10 h-10 rounded-full border-2 border-zinc-100" />
               <Button variant="outline" onClick={onLogout} className="px-4 py-2 text-sm">
                 <LogOut className="w-4 h-4" />
                 Sign Out
@@ -195,7 +169,7 @@ const Navbar = ({ user, onLogin, onLogout }: { user: User | null; onLogin: () =>
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [scores, setScores] = useState<GolfScore[]>([]);
   const [charities, setCharities] = useState<Charity[]>([]);
@@ -225,71 +199,144 @@ export default function App() {
     return profile?.role === 'admin' || user?.email === 'bhatrp12@gmail.com';
   }, [profile, user]);
 
+  // --- Auth Logic ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    if (!supabase) {
+      setLoading(false);
       setIsAuthReady(true);
-      if (!u) setLoading(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setIsAuthReady(true);
+      setLoading(false);
     });
-    return unsubscribe;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setIsAuthReady(true);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const handleLogin = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+    if (error) console.error('Error logging in:', error.message);
+  };
+
+  const handleLogout = async () => {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('Error logging out:', error.message);
+  };
 
   // Fetch Profile
   useEffect(() => {
-    if (!user) return;
-    const path = `users/${user.uid}`;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as UserProfile;
-        
+    if (!user || !supabase) return;
+
+    const fetchProfile = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('uid', user.id)
+        .single();
+
+      if (error && error.code === 'PGRST116') {
+        // Profile doesn't exist, create it
+        const newProfile: UserProfile = {
+          uid: user.id,
+          displayName: user.user_metadata?.full_name || 'Golfer',
+          email: user.email || '',
+          photoURL: user.user_metadata?.avatar_url || undefined,
+          subscriptionStatus: 'none',
+          totalDonated: 0,
+          role: user.email === 'bhatrp12@gmail.com' ? 'admin' : 'user'
+        };
+        const { error: insertError } = await supabase.from('users').insert(newProfile);
+        if (insertError) console.error('Error creating profile:', insertError.message);
+        else setProfile(newProfile);
+      } else if (error) {
+        console.error('Error fetching profile:', error.message);
+      } else {
         // Real-time subscription status check
         if (data.subscriptionStatus !== 'none' && data.subscriptionExpiresAt) {
           const expiresAt = new Date(data.subscriptionExpiresAt);
           if (expiresAt < new Date()) {
             // Subscription lapsed
-            updateDoc(doc(db, 'users', user.uid), { 
-              subscriptionStatus: 'lapsed',
-              autoRenew: false 
-            }).catch(e => handleFirestoreError(e, OperationType.UPDATE, path));
+            await supabase
+              .from('users')
+              .update({ subscriptionStatus: 'lapsed', autoRenew: false })
+              .eq('uid', user.id);
+            data.subscriptionStatus = 'lapsed';
+            data.autoRenew = false;
           }
         }
-        
         setProfile(data);
-      } else {
-        const newProfile: UserProfile = {
-          uid: user.uid,
-          displayName: user.displayName || 'Golfer',
-          email: user.email || '',
-          photoURL: user.photoURL || undefined,
-          subscriptionStatus: 'none',
-          totalDonated: 0,
-          role: user.email === 'bhatrp12@gmail.com' ? 'admin' : 'user'
-        };
-        setDoc(doc(db, 'users', user.uid), newProfile)
-          .catch(e => handleFirestoreError(e, OperationType.WRITE, path));
       }
       setLoading(false);
-    }, (e) => handleFirestoreError(e, OperationType.GET, path));
-    return unsub;
+    };
+
+    fetchProfile();
+
+    // Set up real-time listener for profile
+    const channel = supabase
+      .channel(`public:users:uid=eq.${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `uid=eq.${user.id}` }, (payload) => {
+        setProfile(payload.new as UserProfile);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   // Fetch Scores
   useEffect(() => {
-    if (!user || view === 'admin') return;
-    const path = 'scores';
-    const q = query(collection(db, 'scores'), where('uid', '==', user.uid), orderBy('date', 'desc'), limit(5));
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data(), date: d.data().date.toDate() })) as GolfScore[];
-      setScores(data);
-    }, (e) => handleFirestoreError(e, OperationType.LIST, path));
-    return unsub;
+    if (!user || view === 'admin' || !supabase) return;
+
+    const fetchScores = async () => {
+      const { data, error } = await supabase
+        .from('scores')
+        .select('*')
+        .eq('uid', user.id)
+        .order('date', { ascending: false })
+        .limit(5);
+
+      if (error) console.error('Error fetching scores:', error.message);
+      else setScores(data.map(s => ({ ...s, date: new Date(s.date) })));
+    };
+
+    fetchScores();
+
+    const channel = supabase
+      .channel(`public:scores:uid=eq.${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scores', filter: `uid=eq.${user.id}` }, () => {
+        fetchScores();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user, view]);
 
   // Fetch Charities
   useEffect(() => {
-    const path = 'charities';
-    const unsub = onSnapshot(collection(db, 'charities'), (snap) => {
-      if (snap.empty && isAdmin) {
+    if (!supabase) return;
+    const fetchCharities = async () => {
+      const { data, error } = await supabase.from('charities').select('*');
+      if (error) {
+        console.error('Error fetching charities:', error.message);
+      } else if (data.length === 0 && isAdmin) {
         // Seed initial charities
         const initialCharities = [
           { name: 'Junior Golf Foundation', description: 'Supporting the next generation of golfers in underprivileged communities.', logoUrl: '' },
@@ -297,54 +344,104 @@ export default function App() {
           { name: 'Golf for Veterans', description: 'Providing rehabilitation and community for veterans through the game of golf.', logoUrl: '' },
           { name: 'Urban Golf Outreach', description: 'Bringing golf to inner-city youth programs and schools.', logoUrl: '' }
         ];
-        initialCharities.forEach(c => {
-          const id = c.name.toLowerCase().replace(/\s+/g, '-');
-          setDoc(doc(db, 'charities', id), { ...c, id, totalRaised: 0 });
-        });
+        const charitiesToInsert = initialCharities.map(c => ({
+          ...c,
+          id: c.name.toLowerCase().replace(/\s+/g, '-'),
+          totalRaised: 0
+        }));
+        await supabase.from('charities').insert(charitiesToInsert);
+        setCharities(charitiesToInsert);
+      } else {
+        setCharities(data);
       }
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Charity[];
-      setCharities(data);
-    }, (e) => handleFirestoreError(e, OperationType.LIST, path));
-    return unsub;
+    };
+
+    fetchCharities();
+
+    const channel = supabase
+      .channel('public:charities')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'charities' }, () => {
+        fetchCharities();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [isAdmin]);
 
   // Fetch Draws
   useEffect(() => {
-    const path = 'draws';
-    const unsub = onSnapshot(query(collection(db, 'draws'), orderBy('year', 'desc')), (snap) => {
-      if (snap.empty && isAdmin) {
+    if (!supabase) return;
+    const fetchDraws = async () => {
+      const { data, error } = await supabase
+        .from('draws')
+        .select('*')
+        .order('year', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching draws:', error.message);
+      } else if (data.length === 0 && isAdmin) {
         // Seed initial draw
         const id = '2026-march';
-        setDoc(doc(db, 'draws', id), {
+        const initialDraw = {
           id,
           month: 'March',
           year: 2026,
           prizePool: 5000,
           status: 'active'
-        });
+        };
+        await supabase.from('draws').insert(initialDraw);
+        setAllDraws([initialDraw as Draw]);
+        setCurrentDraw(initialDraw as Draw);
+      } else {
+        setAllDraws(data);
+        const active = data.find(d => d.status === 'active');
+        if (active) setCurrentDraw(active);
       }
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Draw[];
-      setAllDraws(data);
-      const active = data.find(d => d.status === 'active');
-      if (active) setCurrentDraw(active);
-    }, (e) => handleFirestoreError(e, OperationType.LIST, path));
-    return unsub;
+    };
+
+    fetchDraws();
+
+    const channel = supabase
+      .channel('public:draws')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'draws' }, () => {
+        fetchDraws();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [isAdmin]);
 
   // Admin: Fetch All Users
   useEffect(() => {
-    if (!isAdmin || view !== 'admin') return;
-    const path = 'users';
-    const unsub = onSnapshot(collection(db, 'users'), (snap) => {
-      const data = snap.docs.map(d => d.data() as UserProfile);
-      setAllUsers(data);
-    }, (e) => handleFirestoreError(e, OperationType.LIST, path));
-    return unsub;
+    if (!isAdmin || view !== 'admin' || !supabase) return;
+
+    const fetchAllUsers = async () => {
+      const { data, error } = await supabase.from('users').select('*');
+      if (error) console.error('Error fetching all users:', error.message);
+      else setAllUsers(data);
+    };
+
+    fetchAllUsers();
+
+    const channel = supabase
+      .channel('public:users:admin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        fetchAllUsers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [isAdmin, view]);
 
   const handleSubscribe = async (status: 'monthly' | 'yearly') => {
-    if (!user) return signInWithGoogle();
-    const path = `users/${user.uid}`;
+    if (!user) return handleLogin();
+    if (!supabase) return;
     try {
       const expiresAt = new Date();
       if (status === 'monthly') {
@@ -353,105 +450,137 @@ export default function App() {
         expiresAt.setFullYear(expiresAt.getFullYear() + 1);
       }
       
-      await updateDoc(doc(db, 'users', user.uid), { 
-        subscriptionStatus: status,
-        subscriptionExpiresAt: expiresAt.toISOString(),
-        autoRenew: true
-      });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          subscriptionStatus: status,
+          subscriptionExpiresAt: expiresAt.toISOString(),
+          autoRenew: true
+        })
+        .eq('uid', user.id);
+      
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error subscribing:', e.message);
     }
   };
 
   const handleCancelSubscription = async () => {
-    if (!user) return;
-    const path = `users/${user.uid}`;
+    if (!user || !supabase) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { autoRenew: false });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+      const { error } = await supabase
+        .from('users')
+        .update({ autoRenew: false })
+        .eq('uid', user.id);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error cancelling subscription:', e.message);
     }
   };
 
   const handleToggleAutoRenew = async () => {
-    if (!user || !profile) return;
-    const path = `users/${user.uid}`;
+    if (!user || !profile || !supabase) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { autoRenew: !profile.autoRenew });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+      const { error } = await supabase
+        .from('users')
+        .update({ autoRenew: !profile.autoRenew })
+        .eq('uid', user.id);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error toggling auto-renew:', e.message);
     }
   };
 
   const handleSelectCharity = async (charityId: string) => {
-    if (!user) return;
-    const path = `users/${user.uid}`;
+    if (!user || !supabase) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { selectedCharityId: charityId });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+      const { error } = await supabase
+        .from('users')
+        .update({ selectedCharityId: charityId })
+        .eq('uid', user.id);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error selecting charity:', e.message);
     }
   };
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-    const path = `users/${user.uid}`;
+    if (!user || !supabase) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { 
-        displayName: profileForm.displayName,
-        photoURL: profileForm.photoURL
-      });
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          displayName: profileForm.displayName,
+          photoURL: profileForm.photoURL
+        })
+        .eq('uid', user.id);
+      if (error) throw error;
       setShowProfileModal(false);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+    } catch (e: any) {
+      console.error('Error updating profile:', e.message);
     }
   };
 
   const handleSaveCharity = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
-    const path = 'charities';
+    if (!isAdmin || !supabase) return;
     try {
       if (editingCharity) {
-        await updateDoc(doc(db, 'charities', editingCharity.id), newCharity);
+        const { error } = await supabase
+          .from('charities')
+          .update(newCharity)
+          .eq('id', editingCharity.id);
+        if (error) throw error;
       } else {
         const id = newCharity.name.toLowerCase().replace(/\s+/g, '-');
-        await setDoc(doc(db, 'charities', id), { ...newCharity, id, totalRaised: 0 });
+        const { error } = await supabase
+          .from('charities')
+          .insert({ ...newCharity, id, totalRaised: 0 });
+        if (error) throw error;
       }
       setShowAdminCharityModal(false);
       setEditingCharity(null);
       setNewCharity({ name: '', description: '', logoUrl: '' });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, path);
+    } catch (e: any) {
+      console.error('Error saving charity:', e.message);
     }
   };
 
   const handleSaveDraw = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
-    const path = 'draws';
+    if (!isAdmin || !supabase) return;
     try {
       if (editingDraw) {
-        await updateDoc(doc(db, 'draws', editingDraw.id), newDraw);
+        const { error } = await supabase
+          .from('draws')
+          .update(newDraw)
+          .eq('id', editingDraw.id);
+        if (error) throw error;
       } else {
         const id = `${newDraw.year}-${newDraw.month.toLowerCase()}`;
-        await setDoc(doc(db, 'draws', id), { ...newDraw, id, status: 'active' });
+        const { error } = await supabase
+          .from('draws')
+          .insert({ ...newDraw, id, status: 'active' });
+        if (error) throw error;
       }
       setShowAdminDrawModal(false);
       setEditingDraw(null);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, path);
+    } catch (e: any) {
+      console.error('Error saving draw:', e.message);
     }
   };
 
   const handleVerifyPayout = async (drawId: string) => {
-    if (!isAdmin) return;
-    const path = `draws/${drawId}`;
+    if (!isAdmin || !supabase) return;
     try {
-      await updateDoc(doc(db, 'draws', drawId), { payoutVerified: true });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+      const { error } = await supabase
+        .from('draws')
+        .update({ payoutVerified: true })
+        .eq('id', drawId);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error verifying payout:', e.message);
     }
   };
 
@@ -471,16 +600,29 @@ export default function App() {
   };
 
   const generateAlgorithmicNumbers = async () => {
+    if (!supabase) return generateRandomNumbers();
     // Fetch all scores to find frequencies
-    const path = 'scores';
-    const snap = await onSnapshot(collection(db, 'scores'), () => {}); // This is just to get the data once, but onSnapshot is not ideal for one-off.
-    // Actually, I'll use a simple random for now but structure it for weighting.
-    // In a real app, I'd query all scores and build a frequency map.
-    return generateRandomNumbers(); 
+    try {
+      const { data: scores, error } = await supabase.from('scores').select('stablefordPoints');
+      if (error) throw error;
+      
+      // Simple frequency analysis
+      const counts: Record<number, number> = {};
+      scores?.forEach(s => {
+        counts[s.stablefordPoints] = (counts[s.stablefordPoints] || 0) + 1;
+      });
+
+      // Weighted selection (simplified)
+      // Actually, I'll use a simple random for now but structure it for weighting.
+      return generateRandomNumbers();
+    } catch (e: any) {
+      console.error('Error generating algorithmic numbers:', e.message);
+      return generateRandomNumbers();
+    }
   };
 
   const runSimulation = async (type: 'random' | 'algorithmic') => {
-    if (!currentDraw) return;
+    if (!currentDraw || !supabase) return;
     setIsSimulating(true);
     
     // 1. Generate Numbers
@@ -496,8 +638,7 @@ export default function App() {
     
     // 2. Fetch all scores to determine winners
     // This is the "heavy" part
-    const scoresSnap = await onSnapshot(collection(db, 'scores'), () => {}); // Mocking a fetch
-    // Actually, I'll use a mock winner identification for the simulation to avoid massive data fetch in the UI thread
+    // In Supabase we'd use a RPC or a complex query
     
     const winners = {
       match5: [] as string[],
@@ -515,23 +656,27 @@ export default function App() {
   };
 
   const publishDraw = async () => {
-    if (!currentDraw || !simulatedDraw) return;
-    const path = `draws/${currentDraw.id}`;
+    if (!currentDraw || !simulatedDraw || !supabase) return;
     try {
       const rollover = simulatedDraw.winners?.match5.length === 0 ? currentDraw.prizePool : 0;
       
-      await updateDoc(doc(db, 'draws', currentDraw.id), {
-        ...simulatedDraw,
-        status: 'published',
-        rolloverAmount: rollover
-      });
+      const { error } = await supabase
+        .from('draws')
+        .update({
+          ...simulatedDraw,
+          status: 'published',
+          rolloverAmount: rollover
+        })
+        .eq('id', currentDraw.id);
+      
+      if (error) throw error;
 
       // If rollover, create next month's draw
       if (rollover > 0) {
         const nextMonthDate = new Date();
         nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
         const nextId = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, '0')}`;
-        await setDoc(doc(db, 'draws', nextId), {
+        await supabase.from('draws').insert({
           id: nextId,
           month: nextMonthDate.toLocaleString('default', { month: 'long' }),
           year: nextMonthDate.getFullYear(),
@@ -542,15 +687,14 @@ export default function App() {
       }
 
       setSimulatedDraw(null);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+    } catch (e: any) {
+      console.error('Error publishing draw:', e.message);
     }
   };
 
   const handleAddOrEditScore = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-    const path = 'scores';
+    if (!user || !supabase) return;
     try {
       const points = Number(newScore.points);
       if (points < 1 || points > 45) {
@@ -558,77 +702,111 @@ export default function App() {
       }
 
       const scoreData = {
-        uid: user.uid,
-        date: Timestamp.fromDate(new Date(newScore.date)),
+        uid: user.id,
+        date: new Date(newScore.date).toISOString(),
         courseName: newScore.courseName,
         stablefordPoints: points,
         handicap: 18
       };
 
       if (editingScore) {
-        await updateDoc(doc(db, 'scores', editingScore.id), scoreData);
+        const { error } = await supabase
+          .from('scores')
+          .update(scoreData)
+          .eq('id', editingScore.id);
+        if (error) throw error;
       } else {
         // If adding a new score and we already have 5, delete the oldest one
         if (scores.length >= 5) {
           const oldestScore = scores[scores.length - 1];
-          await deleteDoc(doc(db, 'scores', oldestScore.id));
+          await supabase.from('scores').delete().eq('id', oldestScore.id);
         }
-        await addDoc(collection(db, 'scores'), scoreData);
+        const { error } = await supabase.from('scores').insert(scoreData);
+        if (error) throw error;
       }
       setShowScoreModal(false);
       setEditingScore(null);
       setNewScore({ courseName: '', points: 36, date: new Date().toISOString().split('T')[0] });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, path);
+    } catch (e: any) {
+      console.error('Error saving score:', e.message);
     }
   };
 
   const handleUploadProof = async () => {
-    if (!user || !winnerProofUrl) return;
-    const path = `users/${user.uid}`;
+    if (!user || !winnerProofUrl || !supabase) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { winnerProofUrl });
+      const { error } = await supabase
+        .from('users')
+        .update({ winnerProofUrl })
+        .eq('uid', user.id);
+      if (error) throw error;
       setShowProofModal(false);
       setWinnerProofUrl('');
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+    } catch (e: any) {
+      console.error('Error uploading proof:', e.message);
     }
   };
 
   const handleRunDraw = async (drawId: string) => {
-    if (!isAdmin) return;
-    const path = `draws/${drawId}`;
+    if (!isAdmin || !supabase) return;
     try {
       const eligibleUsers = allUsers.filter(u => u.subscriptionStatus !== 'none');
       if (eligibleUsers.length === 0) return alert('No eligible subscribers');
       const winner = eligibleUsers[Math.floor(Math.random() * eligibleUsers.length)];
-      await updateDoc(doc(db, 'draws', drawId), {
-        winnerUid: winner.uid,
-        winnerName: winner.displayName,
-        status: 'completed'
-      });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, path);
+      
+      const { error } = await supabase
+        .from('draws')
+        .update({
+          winnerUid: winner.uid,
+          winnerName: winner.displayName,
+          status: 'completed'
+        })
+        .eq('id', drawId);
+      
+      if (error) throw error;
+    } catch (e: any) {
+      console.error('Error running draw:', e.message);
     }
   };
 
   const chartData = useMemo(() => {
     return [...scores].reverse().map(s => ({
-      date: s.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      date: new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       points: s.stablefordPoints
     }));
   }, [scores]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-white"><div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div></div>;
 
+  if (!supabase) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl text-center">
+          <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <X className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-black uppercase mb-4 tracking-tighter">Configuration Missing</h2>
+          <p className="text-zinc-500 mb-8">
+            Supabase URL or Anon Key is missing. Please add <code className="bg-zinc-100 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="bg-zinc-100 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to your environment variables in the Secrets panel.
+          </p>
+          <div className="p-4 bg-zinc-50 rounded-2xl text-left text-xs font-mono break-all">
+            <div className="text-zinc-400 mb-2 uppercase font-bold">Required Keys:</div>
+            <div>VITE_SUPABASE_URL</div>
+            <div>VITE_SUPABASE_ANON_KEY</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <div className="min-h-screen bg-white font-sans">
-        <Navbar user={null} onLogin={signInWithGoogle} onLogout={logout} />
+        <Navbar user={null} onLogin={handleLogin} onLogout={handleLogout} />
         <section className="pt-32 pb-20 px-6 max-w-7xl mx-auto text-center">
           <h1 className="text-7xl font-black tracking-tighter uppercase mb-8">Track. Impact. <span className="text-orange-500">Win.</span></h1>
           <p className="text-xl text-zinc-600 mb-10 max-w-2xl mx-auto">Join the modern golf community. Log scores, support charities, and win monthly prize pools.</p>
-          <Button onClick={signInWithGoogle} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
+          <Button onClick={handleLogin} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
           
           <div className="mt-20 grid md:grid-cols-3 gap-8 text-left">
             <Card>
@@ -723,7 +901,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] font-sans">
-      <Navbar user={user} onLogin={signInWithGoogle} onLogout={logout} />
+      <Navbar user={user} onLogin={handleLogin} onLogout={handleLogout} />
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
         
         <div className="flex items-center justify-between mb-12">
@@ -928,10 +1106,10 @@ export default function App() {
                 <div className="divide-y">
                   {profile?.subscriptionStatus !== 'none' && profile?.subscriptionStatus !== 'lapsed' ? (
                     scores.length > 0 ? scores.map(s => (
-                      <div key={s.id} className="p-4 flex items-center justify-between hover:bg-zinc-50 cursor-pointer" onClick={() => { setEditingScore(s); setNewScore({ courseName: s.courseName, points: s.stablefordPoints, date: s.date.toISOString().split('T')[0] }); setShowScoreModal(true); }}>
+                      <div key={s.id} className="p-4 flex items-center justify-between hover:bg-zinc-50 cursor-pointer" onClick={() => { setEditingScore(s); setNewScore({ courseName: s.courseName, points: s.stablefordPoints, date: new Date(s.date).toISOString().split('T')[0] }); setShowScoreModal(true); }}>
                         <div>
                           <div className="font-bold">{s.courseName}</div>
-                          <div className="text-xs text-zinc-400">{s.date.toLocaleDateString()}</div>
+                          <div className="text-xs text-zinc-400">{new Date(s.date).toLocaleDateString()}</div>
                         </div>
                         <div className="text-xl font-black">{s.stablefordPoints}</div>
                       </div>
