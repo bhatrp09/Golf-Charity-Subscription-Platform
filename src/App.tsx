@@ -127,7 +127,7 @@ const Navbar = ({ user, onLogin, onLogout, isAdmin, view, setView, onShowAuth }:
   isAdmin: boolean;
   view: 'user' | 'admin';
   setView: (view: 'user' | 'admin') => void;
-  onShowAuth: () => void;
+  onShowAuth: (mode: 'login' | 'signup') => void;
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
 
@@ -184,8 +184,8 @@ const Navbar = ({ user, onLogin, onLogout, isAdmin, view, setView, onShowAuth }:
             </div>
           ) : (
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={onShowAuth} className="px-4 py-2 text-sm">Log In</Button>
-              <Button onClick={onShowAuth} className="px-6 py-2 text-sm">Sign Up</Button>
+              <Button variant="ghost" onClick={() => onShowAuth('login')} className="px-4 py-2 text-sm">Log In</Button>
+              <Button onClick={() => onShowAuth('signup')} className="px-6 py-2 text-sm">Sign Up</Button>
             </div>
           )}
         </div>
@@ -208,6 +208,9 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<'user' | 'admin'>('user');
   const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Form states
   const [showScoreModal, setShowScoreModal] = useState(false);
@@ -264,7 +267,39 @@ export default function App() {
         redirectTo: window.location.origin
       }
     });
-    if (error) console.error('Error logging in:', error.message);
+    if (error) setAuthError(error.message);
+  };
+
+  const handleEmailSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) return;
+    setAuthError(null);
+    const { data, error } = await supabase.auth.signUp({
+      email: authForm.email,
+      password: authForm.password,
+      options: {
+        data: {
+          full_name: authForm.name
+        }
+      }
+    });
+    if (error) setAuthError(error.message);
+    else if (data.user) {
+      // Success - profile will be created by useEffect
+      setShowAuth(false);
+    }
+  };
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) return;
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authForm.email,
+      password: authForm.password
+    });
+    if (error) setAuthError(error.message);
+    else setShowAuth(false);
   };
 
   const handleLogout = async () => {
@@ -977,23 +1012,86 @@ export default function App() {
               </div>
               <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Est. 2026 • Fairway Impact</div>
             </div>
-            <div className="p-12 flex flex-col justify-center text-center">
-              <h3 className="text-2xl font-black uppercase mb-2 tracking-tighter">Welcome Back</h3>
-              <p className="text-sm text-zinc-500 mb-8">Sign in to access your dashboard and manage your impact.</p>
-              <div className="space-y-4">
-                <Button onClick={handleLogin} className="w-full h-14 flex items-center justify-center gap-3 text-lg">
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" />
-                  Continue with Google
-                </Button>
-                <div className="relative py-4">
-                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-100"></div></div>
-                  <div className="relative flex justify-center text-[10px] uppercase font-bold text-zinc-400"><span className="bg-white px-4">Or</span></div>
+            <div className="p-12 flex flex-col justify-center">
+              <div className="text-center mb-8">
+                <h3 className="text-2xl font-black uppercase mb-2 tracking-tighter">{authMode === 'login' ? 'Welcome Back' : 'Create Account'}</h3>
+                <p className="text-sm text-zinc-500">{authMode === 'login' ? 'Sign in to access your dashboard.' : 'Start your journey today.'}</p>
+              </div>
+
+              {authError && (
+                <div className="mb-6 p-4 bg-red-50 text-red-600 text-xs font-bold rounded-2xl border border-red-100">
+                  {authError}
                 </div>
-                <Button variant="ghost" onClick={() => setShowAuth(false)} className="w-full h-12 text-xs uppercase font-bold tracking-widest">
-                  Back to Landing Page
+              )}
+
+              <form onSubmit={authMode === 'login' ? handleEmailLogin : handleEmailSignUp} className="space-y-4 mb-8">
+                {authMode === 'signup' && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 ml-4">Full Name</label>
+                    <input 
+                      type="text" 
+                      required
+                      className="w-full h-12 px-6 bg-zinc-50 border border-zinc-100 rounded-2xl text-sm focus:outline-none focus:border-black transition-colors"
+                      placeholder="John Doe"
+                      value={authForm.name}
+                      onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 ml-4">Email Address</label>
+                  <input 
+                    type="email" 
+                    required
+                    className="w-full h-12 px-6 bg-zinc-50 border border-zinc-100 rounded-2xl text-sm focus:outline-none focus:border-black transition-colors"
+                    placeholder="john@example.com"
+                    value={authForm.email}
+                    onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 ml-4">Password</label>
+                  <input 
+                    type="password" 
+                    required
+                    className="w-full h-12 px-6 bg-zinc-50 border border-zinc-100 rounded-2xl text-sm focus:outline-none focus:border-black transition-colors"
+                    placeholder="••••••••"
+                    value={authForm.password}
+                    onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                  />
+                </div>
+                <Button type="submit" className="w-full h-14 text-lg uppercase font-black tracking-tighter">
+                  {authMode === 'login' ? 'Sign In' : 'Sign Up'}
+                </Button>
+              </form>
+
+              <div className="relative mb-8">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-100"></div></div>
+                <div className="relative flex justify-center text-[10px] uppercase font-bold text-zinc-400"><span className="bg-white px-4">Or continue with</span></div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 mb-8">
+                <Button onClick={handleLogin} variant="outline" className="w-full h-12 flex items-center justify-center gap-3 text-sm font-bold">
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" />
+                  Google
                 </Button>
               </div>
-              <p className="mt-12 text-[10px] text-zinc-400 leading-relaxed">
+
+              <div className="text-center space-y-4">
+                <button 
+                  onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthError(null); }}
+                  className="text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-black transition-colors"
+                >
+                  {authMode === 'login' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
+                </button>
+                <div>
+                  <Button variant="ghost" onClick={() => setShowAuth(false)} className="text-[10px] uppercase font-bold tracking-widest">
+                    Back to Landing Page
+                  </Button>
+                </div>
+              </div>
+
+              <p className="mt-12 text-[10px] text-zinc-400 leading-relaxed text-center">
                 By continuing, you agree to Fairway Impact's <br/>
                 <span className="underline cursor-pointer">Terms of Service</span> and <span className="underline cursor-pointer">Privacy Policy</span>.
               </p>
@@ -1005,11 +1103,11 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-white font-sans">
-        <Navbar user={null} onLogin={handleLogin} onLogout={handleLogout} isAdmin={false} view="user" setView={() => {}} onShowAuth={() => setShowAuth(true)} />
+        <Navbar user={null} onLogin={handleLogin} onLogout={handleLogout} isAdmin={false} view="user" setView={() => {}} onShowAuth={(mode) => { setAuthMode(mode); setShowAuth(true); }} />
         <section className="pt-32 pb-20 px-6 max-w-7xl mx-auto text-center">
           <h1 className="text-7xl font-black tracking-tighter uppercase mb-8">Track. Impact. <span className="text-orange-500">Win.</span></h1>
           <p className="text-xl text-zinc-600 mb-10 max-w-2xl mx-auto">Join the modern golf community. Log scores, support charities, and win monthly prize pools.</p>
-          <Button onClick={() => setShowAuth(true)} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
+          <Button onClick={() => { setAuthMode('signup'); setShowAuth(true); }} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
           
           <div id="concept" className="mt-32 text-left grid md:grid-cols-2 gap-12 items-center">
             <div>
@@ -1130,7 +1228,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] font-sans">
-      <Navbar user={user} onLogin={handleLogin} onLogout={handleLogout} isAdmin={isAdmin} view={view} setView={setView} onShowAuth={() => setShowAuth(true)} />
+      <Navbar user={user} onLogin={handleLogin} onLogout={handleLogout} isAdmin={isAdmin} view={view} setView={setView} onShowAuth={(mode) => { setAuthMode(mode); setShowAuth(true); }} />
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
         
         <div className="flex items-center justify-between mb-8">
