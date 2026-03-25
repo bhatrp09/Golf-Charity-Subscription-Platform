@@ -147,7 +147,7 @@ const Navbar = ({ user, onLogin, onLogout, isAdmin, view, setView, onShowAuth }:
           <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
             <Target className="text-white w-6 h-6" />
           </div>
-          <span className="text-xl font-bold tracking-tighter">FAIRWAY IMPACT</span>
+          <span className="text-xl font-bold tracking-tighter">GOLF CLUB</span>
         </div>
 
         <div className="hidden md:flex items-center gap-8">
@@ -173,7 +173,7 @@ const Navbar = ({ user, onLogin, onLogout, isAdmin, view, setView, onShowAuth }:
           {user ? (
             <div className="flex items-center gap-4">
               <div className="hidden sm:block text-right">
-                <div className="text-xs font-bold uppercase">{user.user_metadata?.full_name}</div>
+                <div className="text-xs font-bold uppercase">{user.user_metadata?.full_name || (user.email === 'admin@12' ? 'Administrator' : 'User')}</div>
                 <div className="text-[10px] text-zinc-400 font-mono">{user.email}</div>
               </div>
               <img src={user.user_metadata?.avatar_url || ''} alt="" className="w-10 h-10 rounded-full border-2 border-zinc-100" />
@@ -211,6 +211,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
 
   // Form states
   const [showScoreModal, setShowScoreModal] = useState(false);
@@ -234,7 +235,7 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<'users' | 'draws' | 'charities' | 'winners' | 'analytics'>('users');
 
   const isAdmin = useMemo(() => {
-    return profile?.role === 'admin' || user?.email === 'bhatrp12@gmail.com';
+    return profile?.role === 'admin' || user?.email === 'admin@12' || user?.email === 'bhatrp12@gmail.com';
   }, [profile, user]);
 
   // --- Auth Logic ---
@@ -272,34 +273,63 @@ export default function App() {
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase) return;
+    if (!supabase) {
+      setAuthError("Database connection not configured. Please add Supabase secrets.");
+      return;
+    }
     setAuthError(null);
-    const { data, error } = await supabase.auth.signUp({
-      email: authForm.email,
-      password: authForm.password,
-      options: {
-        data: {
-          full_name: authForm.name
+    setAuthLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: authForm.email,
+        password: authForm.password,
+        options: {
+          data: {
+            full_name: authForm.name
+          }
+        }
+      });
+      setAuthLoading(false);
+      if (error) {
+        setAuthError(error.message);
+      } else if (data.user) {
+        if (data.session) {
+          setUser(data.user);
+          setShowAuth(false);
+        } else {
+          setAuthError("Check your email for a confirmation link.");
         }
       }
-    });
-    if (error) setAuthError(error.message);
-    else if (data.user) {
-      // Success - profile will be created by useEffect
-      setShowAuth(false);
+    } catch (err: any) {
+      setAuthLoading(false);
+      setAuthError(err.message || "An unexpected error occurred.");
     }
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase) return;
+    if (!supabase) {
+      setAuthError("Database connection not configured. Please add Supabase secrets.");
+      return;
+    }
     setAuthError(null);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: authForm.email,
-      password: authForm.password
-    });
-    if (error) setAuthError(error.message);
-    else setShowAuth(false);
+    setAuthLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authForm.email,
+        password: authForm.password
+      });
+      setAuthLoading(false);
+      if (error) {
+        setAuthError(error.message);
+      } else {
+        if (data.user) setUser(data.user);
+        setShowAuth(false);
+      }
+    } catch (err: any) {
+      setAuthLoading(false);
+      setAuthError(err.message || "An unexpected error occurred.");
+    }
   };
 
   const handleLogout = async () => {
@@ -328,7 +358,7 @@ export default function App() {
           photoURL: user.user_metadata?.avatar_url || undefined,
           subscriptionStatus: 'none',
           totalDonated: 0,
-          role: user.email === 'bhatrp12@gmail.com' ? 'admin' : 'user'
+          role: (user.email === 'admin@12' || user.email === 'bhatrp12@gmail.com') ? 'admin' : 'user'
         };
         const { error: insertError } = await supabase.from('users').insert(newProfile);
         if (insertError) console.error('Error creating profile:', insertError.message);
@@ -375,7 +405,7 @@ export default function App() {
 
     const fetchScores = async () => {
       const { data, error } = await supabase
-        .from('scores')
+        .from('golf_scores')
         .select('*')
         .eq('uid', user.id)
         .order('date', { ascending: false })
@@ -388,8 +418,8 @@ export default function App() {
     fetchScores();
 
     const channel = supabase
-      .channel(`public:scores:uid=eq.${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'scores', filter: `uid=eq.${user.id}` }, () => {
+      .channel(`public:golf_scores:uid=eq.${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'golf_scores', filter: `uid=eq.${user.id}` }, () => {
         fetchScores();
       })
       .subscribe();
@@ -673,7 +703,7 @@ export default function App() {
     if (!supabase) return generateRandomNumbers();
     // Fetch all scores to find frequencies
     try {
-      const { data: scores, error } = await supabase.from('scores').select('stablefordPoints');
+      const { data: scores, error } = await supabase.from('golf_scores').select('stablefordPoints');
       if (error) throw error;
       
       // Simple frequency analysis
@@ -781,7 +811,7 @@ export default function App() {
 
       if (editingScore) {
         const { error } = await supabase
-          .from('scores')
+          .from('golf_scores')
           .update(scoreData)
           .eq('id', editingScore.id);
         if (error) throw error;
@@ -789,9 +819,9 @@ export default function App() {
         // If adding a new score and we already have 5, delete the oldest one
         if (scores.length >= 5) {
           const oldestScore = scores[scores.length - 1];
-          await supabase.from('scores').delete().eq('id', oldestScore.id);
+          await supabase.from('golf_scores').delete().eq('id', oldestScore.id);
         }
-        const { error } = await supabase.from('scores').insert(scoreData);
+        const { error } = await supabase.from('golf_scores').insert(scoreData);
         if (error) throw error;
       }
       setShowScoreModal(false);
@@ -820,7 +850,7 @@ export default function App() {
   const fetchAdminUserScores = async (uid: string) => {
     if (!supabase) return;
     const { data, error } = await supabase
-      .from('scores')
+      .from('golf_scores')
       .select('*')
       .eq('uid', uid)
       .order('date', { ascending: false });
@@ -874,12 +904,12 @@ export default function App() {
 
       if (editingScore) {
         const { error } = await supabase
-          .from('scores')
+          .from('golf_scores')
           .update(scoreData)
           .eq('id', editingScore.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('scores').insert(scoreData);
+        const { error } = await supabase.from('golf_scores').insert(scoreData);
         if (error) throw error;
       }
       setShowAdminScoreModal(false);
@@ -893,7 +923,7 @@ export default function App() {
     if (!supabase || !selectedAdminUser) return;
     if (!confirm('Delete this score?')) return;
     try {
-      const { error } = await supabase.from('scores').delete().eq('id', id);
+      const { error } = await supabase.from('golf_scores').delete().eq('id', id);
       if (error) throw error;
       fetchAdminUserScores(selectedAdminUser.uid);
     } catch (e: any) {
@@ -972,6 +1002,36 @@ export default function App() {
     );
   }
 
+  if (!supabase) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6 font-sans">
+        <Card className="max-w-md w-full text-center p-12 rounded-[3rem] shadow-2xl">
+          <div className="w-20 h-20 bg-orange-50 text-orange-500 rounded-3xl flex items-center justify-center mx-auto mb-8">
+            <Target className="w-10 h-10" />
+          </div>
+          <h2 className="text-3xl font-black uppercase tracking-tighter mb-4 leading-none">Configuration <br/><span className="text-orange-500">Required</span></h2>
+          <p className="text-zinc-500 text-sm mb-10 leading-relaxed">Please add your Supabase URL and Anon Key to the Secrets panel to enable authentication and database features.</p>
+          <div className="space-y-3 text-left bg-zinc-50 p-6 rounded-[2rem] border border-zinc-100 font-mono text-[10px] uppercase tracking-widest">
+            <div className="flex justify-between items-center">
+              <span className="text-zinc-400">Variable</span>
+              <span className="text-zinc-400">Status</span>
+            </div>
+            <div className="h-px bg-zinc-200 my-2" />
+            <div className="flex justify-between items-center">
+              <span className="font-bold">VITE_SUPABASE_URL</span>
+              <span className="text-red-500 font-black">Missing</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="font-bold">VITE_SUPABASE_ANON_KEY</span>
+              <span className="text-red-500 font-black">Missing</span>
+            </div>
+          </div>
+          <p className="mt-10 text-[10px] text-zinc-400 font-mono uppercase tracking-widest">Golf Club • System Check</p>
+        </Card>
+      </div>
+    );
+  }
+
   if (!user) {
     if (showAuth) {
       return (
@@ -983,7 +1043,7 @@ export default function App() {
                   <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center">
                     <Target className="text-black w-6 h-6" />
                   </div>
-                  <span className="text-xl font-bold tracking-tighter">FAIRWAY IMPACT</span>
+                  <span className="text-xl font-bold tracking-tighter">GOLF CLUB</span>
                 </div>
                 <h2 className="text-4xl font-black uppercase tracking-tighter mb-8 leading-none">Join the <br/>Community.</h2>
                 <div className="space-y-6">
@@ -1010,7 +1070,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Est. 2026 • Fairway Impact</div>
+              <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Est. 2026 • Golf Club</div>
             </div>
             <div className="p-12 flex flex-col justify-center">
               <div className="text-center mb-8">
@@ -1041,10 +1101,10 @@ export default function App() {
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold uppercase text-zinc-400 ml-4">Email Address</label>
                   <input 
-                    type="email" 
+                    type="text" 
                     required
                     className="w-full h-12 px-6 bg-zinc-50 border border-zinc-100 rounded-2xl text-sm focus:outline-none focus:border-black transition-colors"
-                    placeholder="john@example.com"
+                    placeholder="email@example.com"
                     value={authForm.email}
                     onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
                   />
@@ -1060,9 +1120,18 @@ export default function App() {
                     onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
                   />
                 </div>
-                <Button type="submit" className="w-full h-14 text-lg uppercase font-black tracking-tighter">
-                  {authMode === 'login' ? 'Sign In' : 'Sign Up'}
+                <Button type="submit" disabled={authLoading} className="w-full h-14 text-lg uppercase font-black tracking-tighter">
+                  {authLoading ? (
+                    <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+                  ) : (
+                    authMode === 'login' ? 'Sign In' : 'Sign Up'
+                  )}
                 </Button>
+                {authMode === 'login' && (
+                  <p className="mt-4 text-[10px] text-zinc-400 text-center uppercase tracking-widest">
+                    Admin? Make sure to <span className="text-black font-bold cursor-pointer underline" onClick={() => setAuthMode('signup')}>Sign Up</span> with admin@12 first.
+                  </p>
+                )}
               </form>
 
               <div className="relative mb-8">
@@ -1092,7 +1161,7 @@ export default function App() {
               </div>
 
               <p className="mt-12 text-[10px] text-zinc-400 leading-relaxed text-center">
-                By continuing, you agree to Fairway Impact's <br/>
+                By continuing, you agree to Golf Club's <br/>
                 <span className="underline cursor-pointer">Terms of Service</span> and <span className="underline cursor-pointer">Privacy Policy</span>.
               </p>
             </div>
@@ -1105,6 +1174,9 @@ export default function App() {
       <div className="min-h-screen bg-white font-sans">
         <Navbar user={null} onLogin={handleLogin} onLogout={handleLogout} isAdmin={false} view="user" setView={() => {}} onShowAuth={(mode) => { setAuthMode(mode); setShowAuth(true); }} />
         <section className="pt-32 pb-20 px-6 max-w-7xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-100 text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-8">
+            <Users className="w-3 h-3" /> Public Visitor
+          </div>
           <h1 className="text-7xl font-black tracking-tighter uppercase mb-8">Track. Impact. <span className="text-orange-500">Win.</span></h1>
           <p className="text-xl text-zinc-600 mb-10 max-w-2xl mx-auto">Join the modern golf community. Log scores, support charities, and win monthly prize pools.</p>
           <Button onClick={() => { setAuthMode('signup'); setShowAuth(true); }} className="h-14 px-10 text-lg mx-auto">Get Started</Button>
@@ -1112,7 +1184,7 @@ export default function App() {
           <div id="concept" className="mt-32 text-left grid md:grid-cols-2 gap-12 items-center">
             <div>
               <h2 className="text-5xl font-black uppercase mb-6 tracking-tighter leading-none">The Future of <br/><span className="text-orange-500">Social Golf</span></h2>
-              <p className="text-lg text-zinc-600 mb-8">Fairway Impact is more than just a score tracker. We've built a platform where your passion for golf directly fuels positive change in the world.</p>
+              <p className="text-lg text-zinc-600 mb-8">Golf Club is more than just a score tracker. We've built a platform where your passion for golf directly fuels positive change in the world.</p>
               <div className="space-y-4">
                 <div className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100">
                   <h4 className="font-bold uppercase mb-2 flex items-center gap-2"><Target className="w-5 h-5 text-orange-500" /> Transparent Draw Mechanics</h4>
@@ -1222,6 +1294,49 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        <footer className="bg-zinc-50 border-t border-zinc-100 py-20 px-6">
+          <div className="max-w-7xl mx-auto grid md:grid-cols-4 gap-12">
+            <div className="col-span-2">
+              <div className="flex items-center gap-2 mb-6">
+                <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
+                  <Target className="text-white w-5 h-5" />
+                </div>
+                <span className="text-lg font-bold tracking-tighter uppercase">Golf Club</span>
+              </div>
+              <p className="text-sm text-zinc-500 max-w-sm mb-8">The modern golf community where performance meets purpose. Track your game, support your charity, and win big.</p>
+              <div className="flex gap-4">
+                <Button variant="outline" onClick={() => { setAuthMode('login'); setShowAuth(true); }} className="text-xs h-10 px-4">Admin Login</Button>
+                <Button variant="ghost" onClick={() => { setAuthMode('signup'); setShowAuth(true); }} className="text-xs h-10 px-4">Join Community</Button>
+              </div>
+            </div>
+            <div>
+              <h4 className="font-bold uppercase text-[10px] tracking-widest text-zinc-400 mb-6">User Roles</h4>
+              <ul className="space-y-4">
+                <li className="text-xs font-medium text-zinc-600">Public Visitor</li>
+                <li className="text-xs font-medium text-zinc-600">Registered Subscriber</li>
+                <li className="text-xs font-medium text-zinc-600">Administrator</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-bold uppercase text-[10px] tracking-widest text-zinc-400 mb-6">Platform</h4>
+              <ul className="space-y-4">
+                <li><a href="#concept" className="text-xs font-medium text-zinc-600 hover:text-black">Concept</a></li>
+                <li><a href="#features" className="text-xs font-medium text-zinc-600 hover:text-black">Features</a></li>
+                <li><a href="#charities" className="text-xs font-medium text-zinc-600 hover:text-black">Charities</a></li>
+                <li><a href="#mechanics" className="text-xs font-medium text-zinc-600 hover:text-black">Mechanics</a></li>
+              </ul>
+            </div>
+          </div>
+          <div className="max-w-7xl mx-auto mt-20 pt-8 border-t border-zinc-200 flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest">© 2026 Golf Club • All Rights Reserved</p>
+            <div className="flex gap-6">
+              <span className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest cursor-pointer hover:text-black">Privacy</span>
+              <span className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest cursor-pointer hover:text-black">Terms</span>
+              <span className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest cursor-pointer hover:text-black">Cookies</span>
+            </div>
+          </div>
+        </footer>
       </div>
     );
   }
@@ -1233,7 +1348,15 @@ export default function App() {
         
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase">{view === 'admin' ? 'Admin Command' : 'Dashboard'}</h1>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-5xl font-black tracking-tighter uppercase">{view === 'admin' ? 'Admin Command' : 'Dashboard'}</h1>
+              <span className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
+                view === 'admin' ? "bg-red-50 text-red-600 border border-red-100" : "bg-black text-white"
+              )}>
+                {view === 'admin' ? 'Administrator' : 'Subscriber'}
+              </span>
+            </div>
             <p className="text-zinc-500 font-medium">{view === 'admin' ? 'System Overview & Controls' : `Welcome, ${profile?.displayName}`}</p>
           </div>
           <div className="flex gap-3">
